@@ -11,13 +11,23 @@ DOWNLOAD_DIR = "downloaded_photos"
 OUTPUT_DIR = "output_faces"
 
 st.set_page_config(layout="wide")
-st.title("🧠 Face Grouping App")
+st.markdown("""
+<div style="text-align:center; margin-top: -30px;">
+    <h1 style="font-size: 2.5em;">🧠 Face Grouping Tool</h1>
+    <p style="color:gray;">Upload or fetch images, detect faces, and group them by similarity.</p>
+</div>
+""", unsafe_allow_html=True)
+
 
 # Initialize session state
 if "page" not in st.session_state:
     st.session_state.page = "main"
 if "selected_group" not in st.session_state:
     st.session_state.selected_group = None
+if "processing" not in st.session_state:
+    st.session_state.processing = False
+if "source_type" not in st.session_state:
+    st.session_state.source_type = "Google Drive Folder URL"
 
 # Handle direct URL query param
 query_params = st.query_params
@@ -33,22 +43,83 @@ def get_base64_image(img_path):
 
 # --- Page 1: Main UI ---
 if st.session_state.page == "main":
-    source_type = st.radio("Choose source type", ["Google Drive Folder URL", "Local Directory"])
+    st.markdown("### 📂 Select Image Source")
+    source_type = st.radio(
+        "",
+        ["Google Drive Folder URL", "Local Directory"],
+        horizontal=True,
+        key="source_type",
+        disabled=st.session_state.processing
+    )
 
-    if source_type == "Google Drive Folder URL":
-        gdrive_url = st.text_input("Enter Google Drive Folder URL")
-        if st.button("Start Grouping"):
-            with st.spinner("Downloading and processing..."):
-                download_gdrive_folder(gdrive_url, DOWNLOAD_DIR)
-                run_pipeline(DOWNLOAD_DIR, OUTPUT_DIR)
-            st.success("✅ Done!")
+    if st.session_state.source_type == "Google Drive Folder URL":
+        with st.container():
+            st.markdown("#### 🔗 Fetch Images from Google Drive")
+            gdrive_url = st.text_input("Paste Google Drive Folder URL here")
+            st.caption("Make sure the folder is shared publicly")
 
-    elif source_type == "Local Directory":
-        local_path = st.text_input("Enter local image folder path")
-        if st.button("Start Grouping"):
-            with st.spinner("Processing local folder..."):
-                run_pipeline(local_path, OUTPUT_DIR)
-            st.success("✅ Done!")
+            if st.button("🚀 Start Grouping") and not st.session_state.processing:
+                st.session_state.processing = True
+                with st.spinner("Downloading and processing..."):
+
+                    progress = st.progress(0, text="Downloading images...")
+
+
+                    def update_progress(fraction):
+                        progress.progress(fraction, text=f"Downloading {int(fraction * 100)}%")
+
+
+                    download_gdrive_folder(gdrive_url, DOWNLOAD_DIR, progress_callback=update_progress)
+                    progress.empty()
+
+                    progress_bar = st.progress(0, text="Processing images...")
+
+
+                    def update_processing(fraction):
+                        progress_bar.progress(fraction, text=f"Processing {int(fraction * 100)}%")
+
+
+                    run_pipeline(DOWNLOAD_DIR, OUTPUT_DIR, update_progress=update_processing)
+                    progress_bar.empty()
+                st.session_state.processing = False
+                st.success("✅ Done!")
+
+
+    elif st.session_state.source_type == "Local Directory":
+        with st.container():
+            st.markdown("#### 📁 Upload Images from Local Folder")
+            uploaded_files = st.file_uploader(
+                "Choose image files",
+                type=["jpg", "jpeg", "png"],
+                accept_multiple_files=True,
+                label_visibility="collapsed"
+            )
+            st.caption("Supported formats: JPG, JPEG, PNG")
+
+            if st.button("🚀 Start Grouping") and not st.session_state.processing:
+                st.session_state.processing = True
+                os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+                progress = st.progress(0, text="Saving uploaded images...")
+                total_files = len(uploaded_files)
+
+                for i, uploaded_file in enumerate(uploaded_files):
+                    file_path = os.path.join(DOWNLOAD_DIR, uploaded_file.name)
+                    with open(file_path, "wb") as f:
+                        f.write(uploaded_file.getbuffer())
+                    progress.progress((i + 1) / total_files, text=f"Saved {i + 1}/{total_files} images")
+
+                progress.empty()
+                progress_bar = st.progress(0, text="Processing images...")
+
+
+                def update_progress(fraction):
+                    progress_bar.progress(fraction, text=f"Processing {int(fraction * 100)}%")
+
+
+                run_pipeline(DOWNLOAD_DIR, OUTPUT_DIR, update_progress=update_progress)
+                progress_bar.empty()
+                st.session_state.processing = False
+                st.success("✅ Done!")
 
     # Show face groups
     if os.path.exists(OUTPUT_DIR):
@@ -57,7 +128,10 @@ if st.session_state.page == "main":
             key=lambda x: -len(os.listdir(os.path.join(OUTPUT_DIR, x)))
         )
 
+        st.markdown("---")
         st.subheader("👥 Grouped Faces")
+        st.caption("Click a face to view all photos of that person")
+
         cols_per_row = 5
         for i in range(0, len(folders), cols_per_row):
             cols = st.columns(cols_per_row)
@@ -72,7 +146,7 @@ if st.session_state.page == "main":
                             f"""
                             <a href="?group={folder_encoded}">
                                 <img src="data:image/jpeg;base64,{b64_thumb}" 
-                                     style="width:100px; height:100px; border-radius:50%; object-fit:cover; border:2px solid #ccc; display: block; margin: auto;" />
+                                     style="width:100px; height:100px; border-radius:50%; object-fit:cover; border:2px solid #ccc; background-color:#f9f9f9; padding:4px; display: block; margin: auto;" />
                             </a>
                             """,
                             unsafe_allow_html=True
@@ -83,7 +157,8 @@ elif st.session_state.page == "details":
     group = st.session_state.selected_group
     group_path = os.path.join(OUTPUT_DIR, group)
 
-    st.markdown("### 👤 Photos in this Group")
+    st.markdown(f"<h3 style='text-align:center;'>👤 Photos in <code>{group}</code></h3>", unsafe_allow_html=True)
+    st.markdown("<hr style='margin-top: 10px; margin-bottom: 20px;'>", unsafe_allow_html=True)
     if st.button("🔙 Back to Groups"):
         st.session_state.page = "main"
         st.session_state.selected_group = None
