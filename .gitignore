@@ -1,3 +1,6 @@
 venv/
 face_grouper/__pycache__/
 input_photos/
+output_faces/
+downloaded_photos/
+logs/
